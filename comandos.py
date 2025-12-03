@@ -1,6 +1,6 @@
 # comandos.py
 """
-Modulo de Comandos - Patron Command
+Modulo de Comandos 
 Todas las operaciones del sistema como comandos
 Bajo acoplamiento - recibe instancia de FileSystem
 """
@@ -26,22 +26,27 @@ class Comando(ABC):
         return f"Uso: {self.obtener_nombre()} [argumentos]"
 
 class ComandoCD(Comando):
-    """Comando para cambiar directorio (CORREGIDO - maneja rutas absolutas y multiples niveles)"""
+    """
+    Comando para cambiar directorio (maneja rutas absolutas y múltiples niveles)
+    
+    Este comando se aplica para la navegación dentro del árbol de directorios del sistema de archivos.
+    Permite al usuario cambiar su ubicación actual (contexto) a otra carpeta, soportando:
+    1. Rutas relativas (ej: "cd fotos", "cd ..")
+    2. Rutas absolutas (ej: "cd C:/Documentos")
+    3. Navegación compleja (ej: "cd ../Proyectos/Python")
+    """
     
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         if not argumentos:
             return self.obtener_uso()
         
         ruta = argumentos[0]
-        # Tratar rutas que comienzan con '/' como rutas absolutas respecto a la unidad raiz
-        if ruta.startswith('/') and not ruta.startswith(sistema.unidad_raiz):
-            ruta = sistema.unidad_raiz + ruta
         sistema.registrar_operacion(f"cd {ruta}")
         
         # Manejar rutas absolutas (que empiezan con C:)
         if ruta.startswith(sistema.unidad_raiz):
             return self._manejar_ruta_absoluta(sistema, ruta)
-        # Manejar rutas relativas con multiples niveles
+        # Manejar rutas relativas con múltiples niveles
         elif '/' in ruta or '\\' in ruta:
             return self._manejar_ruta_relativa(sistema, ruta)
         # Manejar casos simples: .. o nombre de carpeta
@@ -52,7 +57,7 @@ class ComandoCD(Comando):
                 return self._cambiar_directorio(sistema, ruta)
     
     def _manejar_ruta_absoluta(self, sistema, ruta: str) -> str:
-        """Maneja rutas absolutas (desde la raiz)"""
+        """Maneja rutas absolutas (desde la raíz)"""
         # Normalizar la ruta: reemplazar \ por / y eliminar la unidad
         ruta_normalizada = ruta.replace('\\', '/')
         if ruta_normalizada.startswith(sistema.unidad_raiz + '/'):
@@ -60,7 +65,7 @@ class ComandoCD(Comando):
         elif ruta_normalizada == sistema.unidad_raiz:
             ruta_normalizada = ""
         
-        # Si la ruta esta vacia, ir a la raiz
+        # Si la ruta está vacía, ir a la raíz
         if not ruta_normalizada:
             sistema.directorio_actual = sistema.raiz
             sistema.ruta_actual = sistema.unidad_raiz
@@ -68,7 +73,7 @@ class ComandoCD(Comando):
         
         # Dividir la ruta en partes
         partes = ruta_normalizada.split('/')
-        # Empezar desde la raiz
+        # Empezar desde la raíz
         directorio_actual = sistema.raiz
         ruta_actual = sistema.unidad_raiz
         
@@ -82,7 +87,7 @@ class ComandoCD(Comando):
                     if directorio_actual == sistema.raiz:
                         ruta_actual = sistema.unidad_raiz
                     else:
-                        # Recortar la ultima parte de la ruta
+                        # Recortar la última parte de la ruta
                         partes_ruta = ruta_actual.split('/')
                         if len(partes_ruta) > 1:
                             ruta_actual = '/'.join(partes_ruta[:-1])
@@ -99,9 +104,7 @@ class ComandoCD(Comando):
                 if siguiente is None:
                     return f"Error: No se encuentra el directorio: {parte}"
                 directorio_actual = siguiente
-                if ruta_actual.endswith(':'):
-                    ruta_actual += '/' + parte
-                elif ruta_actual.endswith('/'):
+                if ruta_actual.endswith('/'):
                     ruta_actual += parte
                 else:
                     ruta_actual += '/' + parte
@@ -111,7 +114,7 @@ class ComandoCD(Comando):
         return f"Directorio actual: {sistema.ruta_actual}"
     
     def _manejar_ruta_relativa(self, sistema, ruta: str) -> str:
-        """Maneja rutas relativas con multiples niveles"""
+        """Maneja rutas relativas con múltiples niveles"""
         # Normalizar la ruta: reemplazar \ por /
         ruta_normalizada = ruta.replace('\\', '/')
         partes = ruta_normalizada.split('/')
@@ -129,7 +132,7 @@ class ComandoCD(Comando):
                     if directorio_actual == sistema.raiz:
                         ruta_actual = sistema.unidad_raiz
                     else:
-                        # Recortar la ultima parte de la ruta
+                        # Recortar la última parte de la ruta
                         partes_ruta = ruta_actual.split('/')
                         if len(partes_ruta) > 1:
                             ruta_actual = '/'.join(partes_ruta[:-1])
@@ -146,9 +149,7 @@ class ComandoCD(Comando):
                 if siguiente is None:
                     return f"Error: No se encuentra el directorio: {parte}"
                 directorio_actual = siguiente
-                if ruta_actual.endswith(':'):
-                    ruta_actual += '/' + parte
-                elif ruta_actual.endswith('/'):
+                if ruta_actual.endswith('/'):
                     ruta_actual += parte
                 else:
                     ruta_actual += '/' + parte
@@ -199,7 +200,14 @@ class ComandoCD(Comando):
         return "cd <ruta> (puede ser relativa o absoluta)"
 
 class ComandoMKDIR(Comando):
-    """Comando para crear directorios (CORREGIDO - acepta rutas destino)"""
+    """
+    Comando para crear directorios (acepta rutas destino)
+    
+  
+    Este comando se utiliza para extender la estructura del sistema de archivos creando nuevas carpetas.
+    Se aplica validando previamente que el nombre sea válido y que no exista ya un elemento con el mismo nombre.
+    También soporta la creación en rutas remotas sin necesidad de moverse (ej: "mkdir Documentos/Nuevos").
+    """
     
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         if not argumentos:
@@ -214,7 +222,7 @@ class ComandoMKDIR(Comando):
             return self._crear_directorio_actual(sistema, ruta_completa)
     
     def _crear_directorio_en_ruta(self, sistema, ruta_completa: str) -> str:
-        """Crea un directorio en una ruta especifica"""
+        """Crea un directorio en una ruta específica"""
         # Normalizar la ruta
         ruta_normalizada = ruta_completa.replace('\\', '/')
         # Separar la ruta del nombre del directorio
@@ -234,9 +242,6 @@ class ComandoMKDIR(Comando):
         comando_cd = ComandoCD()
         resultado_cd = comando_cd.ejecutar(sistema, [ruta_destino])
         if resultado_cd.startswith("Error"):
-            # Restaurar estado original
-            sistema.directorio_actual = directorio_original
-            sistema.ruta_actual = ruta_original
             return resultado_cd
         
         # Crear el directorio en el destino
@@ -281,7 +286,13 @@ class ComandoMKDIR(Comando):
         return "mkdir <ruta> (puede incluir una ruta destino)"
 
 class ComandoTYPE(Comando):
-    """Comando para crear archivos con contenido (CORREGIDO - acepta rutas destino)"""
+    """
+    Comando para crear archivos con contenido ( acepta rutas destino)
+    
+    Este comando permite la creación de archivos de texto simulados con contenido.
+    Se aplica para demostrar la capacidad del sistema de manejar diferentes tipos de entidades (Archivos vs Carpetas).
+    Al igual que mkdir, soporta la creación en rutas específicas.
+    """
     
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         if len(argumentos) < 2:
@@ -297,7 +308,7 @@ class ComandoTYPE(Comando):
             return self._crear_archivo_actual(sistema, ruta_completa, contenido)
     
     def _crear_archivo_en_ruta(self, sistema, ruta_completa: str, contenido: str) -> str:
-        """Crea un archivo en una ruta especifica"""
+        """Crea un archivo en una ruta específica"""
         # Normalizar la ruta
         ruta_normalizada = ruta_completa.replace('\\', '/')
         # Separar la ruta del nombre del archivo
@@ -317,9 +328,6 @@ class ComandoTYPE(Comando):
         comando_cd = ComandoCD()
         resultado_cd = comando_cd.ejecutar(sistema, [ruta_destino])
         if resultado_cd.startswith("Error"):
-            # Restaurar estado original
-            sistema.directorio_actual = directorio_original
-            sistema.ruta_actual = ruta_original
             return resultado_cd
         
         # Crear el archivo en el destino
@@ -366,92 +374,71 @@ class ComandoTYPE(Comando):
         return 'type <ruta_archivo> "<contenido>" (puede incluir una ruta destino)'
 
 class ComandoRMDIR(Comando):
-    """Comando para eliminar directorios (CORREGIDO - soporta /s y /q completamente)"""
+    """
+    Comando para eliminar directorios ( soporta /s y /q)
+    
+    Este comando gestiona la eliminación de carpetas del sistema.
+    Se aplica con lógica de seguridad: por defecto no permite borrar carpetas que contengan archivos.
+    Implementa el flag '/s' para permitir el borrado recursivo.
+    """
     
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         if not argumentos:
             return self.obtener_uso()
-        # Parsear flags y objetivo
+        
+        # Parsear flags y nombre de carpeta
         flags = []
-        objetivo = ""
+        nombre_carpeta = ""
         for arg in argumentos:
-            if arg.startswith('/') and len(arg) > 1 and not (arg.count(':') == 1 and arg[1].isalpha()):
-                # flags como /s o /q
+            if arg.startswith('/'):
                 flags.append(arg.upper())
             else:
-                objetivo = arg
-
-        if not objetivo:
+                nombre_carpeta = arg
+        
+        if not nombre_carpeta:
             return "Error: Se requiere especificar un directorio"
-
-        # Soportar rutas destino (absolutas o relativas)
-        ruta_obj = objetivo.replace('\\', '/')
-        carpeta_nombre = objetivo
-        navigado = False
-        directorio_original = sistema.directorio_actual
-        ruta_original = sistema.ruta_actual
-
-        try:
-            if ruta_obj.startswith(sistema.unidad_raiz) or ruta_obj.startswith('/') or '/' in ruta_obj:
-                # Normalizar inicio con unidad si empieza con '/'
-                if ruta_obj.startswith('/') and not ruta_obj.startswith(sistema.unidad_raiz):
-                    ruta_obj = sistema.unidad_raiz + ruta_obj
-
-                partes = ruta_obj.split('/')
-                carpeta_nombre = partes[-1]
-                ruta_destino = '/'.join(partes[:-1]) if len(partes) > 1 else sistema.unidad_raiz
-
-                # Navegar temporalmente a la ruta destino
-                comando_cd = ComandoCD()
-                resultado_cd = comando_cd.ejecutar(sistema, [ruta_destino])
-                if resultado_cd.startswith("Error"):
-                    return resultado_cd
-                navigado = True
-
-            # Buscar carpeta case-insensitive en el directorio actual (posiblemente el destino navegada)
-            carpeta_a_eliminar = None
-            for elemento in sistema.directorio_actual.contenido:
-                if (hasattr(elemento, 'nombre') and 
-                    elemento.nombre.lower() == carpeta_nombre.lower() and 
-                    elemento.tipo == "carpeta"):
-                    carpeta_a_eliminar = elemento
-                    break
-
-            if carpeta_a_eliminar is None:
-                return f"Error: La carpeta '{carpeta_nombre}' no existe en {sistema.ruta_actual}."
-
-            # Verificar si la carpeta esta vacia, a menos que se use /s
-            if not carpeta_a_eliminar.contenido.esta_vacia() and '/S' not in flags:
-                return f"Error: La carpeta '{carpeta_a_eliminar.nombre}' no esta vacia. Use /s para eliminar recursivamente."
-
-            # Si se usa /s, eliminar recursivamente
-            if '/S' in flags:
-                self._vaciar_recursivamente(carpeta_a_eliminar)
-
-            # Eliminar la carpeta misma del directorio actual
+        
+        # Buscar carpeta case-insensitive
+        carpeta_a_eliminar = None
+        for elemento in sistema.directorio_actual.contenido:
+            if (hasattr(elemento, 'nombre') and 
+                elemento.nombre.lower() == nombre_carpeta.lower() and 
+                elemento.tipo == "carpeta"):
+                carpeta_a_eliminar = elemento
+                break
+        
+        if carpeta_a_eliminar is None:
+            return f"Error: La carpeta '{nombre_carpeta}' no existe en este directorio."
+        
+        # Verificar si la carpeta está vacía, a menos que se use /s
+        if not carpeta_a_eliminar.contenido.esta_vacia() and '/S' not in flags:
+            return f"Error: La carpeta '{carpeta_a_eliminar.nombre}' no está vacía. Use /s para eliminar recursivamente."
+        
+        # Si se usa /s, eliminar recursivamente
+        if '/S' in flags:
+            self._eliminar_recursivamente(sistema, carpeta_a_eliminar)
+        else:
+            # Eliminación normal (solo si está vacía)
             eliminado = sistema.directorio_actual.eliminar_elemento(carpeta_a_eliminar)
-
             if not eliminado:
-                return f"Error interno al intentar eliminar la carpeta '{carpeta_nombre}'."
-
-            sistema.registrar_operacion(f"rmdir {carpeta_a_eliminar.nombre}")
-            sistema.respaldar_automatico()
-            return f'Carpeta "{carpeta_a_eliminar.nombre}" eliminada exitosamente de {sistema.ruta_actual}'
-
-        finally:
-            # Restaurar directorio original si fue necesario
-            if navigado:
-                sistema.directorio_actual = directorio_original
-                sistema.ruta_actual = ruta_original
+                return f"Error interno al intentar eliminar la carpeta '{nombre_carpeta}'."
+        
+        sistema.registrar_operacion(f"rmdir {carpeta_a_eliminar.nombre}")
+        sistema.respaldar_automatico()
+        return f'Carpeta "{carpeta_a_eliminar.nombre}" eliminada exitosamente de {sistema.ruta_actual}'
     
-    def _vaciar_recursivamente(self, carpeta):
-        """Vacia recursivamente una carpeta eliminando todo su contenido"""
+    def _eliminar_recursivamente(self, sistema, carpeta):
+        """Elimina recursivamente una carpeta y todo su contenido"""
+        # Primero eliminar todo el contenido de la carpeta
         while not carpeta.contenido.esta_vacia():
             elemento = carpeta.contenido.desencolar()
             if elemento.tipo == "carpeta":
-                # Si es una carpeta, vaciarla recursivamente primero
-                self._vaciar_recursivamente(elemento)
-            # Los archivos se eliminan automaticamente al desencolar
+                self._eliminar_recursivamente(sistema, elemento)
+            else:
+                # Es un archivo, se elimina directamente
+                pass  # Al desencolar, ya se elimina de la cola
+        # Luego eliminar la carpeta misma del directorio padre
+        sistema.directorio_actual.eliminar_elemento(carpeta)
     
     def obtener_nombre(self) -> str:
         return "rmdir"
@@ -460,7 +447,13 @@ class ComandoRMDIR(Comando):
         return "rmdir <nombre_carpeta> [/s] [/q]"
 
 class ComandoDIR(Comando):
-    """Comando para listar contenido de directorios (CORREGIDO - acepta rutas destino)"""
+    """
+    Comando para listar contenido de directorios ( acepta rutas destino)
+    
+    Este comando se usa para visualizar el estado actual del sistema de archivos.
+    Se aplica recorriendo la lista de hijos del nodo (carpeta) actual o del nodo especificado en la ruta.
+    Es fundamental para que el usuario verifique el resultado de sus operaciones anteriores.
+    """
     
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         ruta = argumentos[0] if argumentos else ""
@@ -473,7 +466,7 @@ class ComandoDIR(Comando):
             return self._listar_actual(sistema)
     
     def _listar_ruta(self, sistema, ruta: str) -> str:
-        """Lista el contenido de una ruta especifica"""
+        """Lista el contenido de una ruta específica"""
         # Guardar el estado actual
         directorio_original = sistema.directorio_actual
         ruta_original = sistema.ruta_actual
@@ -482,9 +475,6 @@ class ComandoDIR(Comando):
         comando_cd = ComandoCD()
         resultado_cd = comando_cd.ejecutar(sistema, [ruta])
         if resultado_cd.startswith("Error"):
-            # Restaurar estado original
-            sistema.directorio_actual = directorio_original
-            sistema.ruta_actual = ruta_original
             return resultado_cd
         
         # Listar el directorio destino
@@ -498,6 +488,8 @@ class ComandoDIR(Comando):
     
     def _listar_actual(self, sistema) -> str:
         """Lista el contenido del directorio actual"""
+        sistema.registrar_operacion("dir")
+        
         resultado = f"Directorio de {sistema.ruta_actual}\n"
         resultado += "-" * 40 + "\n"
         
@@ -510,9 +502,6 @@ class ComandoDIR(Comando):
                 resultado += f"{elemento}\n"
         
         resultado += f"\nTotal: {len(elementos)} elemento(s)"
-        
-        # Registrar operacion al final
-        sistema.registrar_operacion("dir")
         return resultado
     
     def obtener_nombre(self) -> str:

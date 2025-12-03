@@ -6,13 +6,25 @@ Bajo acoplamiento - solo exporta clases Cola y Pila
 """
 
 class Nodo:
-    """Nodo basico para listas enlazadas"""
+    """
+    Nodo basico para listas enlazadas
+    
+    Unidad fundamental de almacenamiento dinámico.
+    Permite crear estructuras de datos que crecen dinámicamente en memoria,
+    enlazando cada elemento con el siguiente mediante referencias (punteros).
+    """
     def __init__(self, valor=None):
         self.valor = valor
         self.siguiente = None
 
 class Pila:
-    """Implementacion de Pila (LIFO) usando lista enlazada"""
+    """
+    Implementacion de Pila (LIFO) usando lista enlazada
+    
+    Estructura de datos LIFO (Last In, First Out).
+    Se utiliza en el proyecto para gestionar el historial de operaciones y errores.
+    Es ideal para historiales porque lo último que hiciste es lo primero que querrías ver o deshacer.
+    """
     
     def __init__(self):
         self.cabeza = None
@@ -47,15 +59,15 @@ class Pila:
             yield actual.valor
             actual = actual.siguiente
 
-    def to_list(self) -> list:
-        """Devuelve una lista de los elementos de la pila sin modificarla.
-
-        El orden es desde el tope (ultimo apilado) hasta el fondo.
-        """
-        return list(self)
-
 class Cola:
-    """Implementacion de Cola (FIFO) usando lista enlazada"""
+    """
+    Implementacion de Cola (FIFO) usando lista enlazada
+    
+    Estructura de datos FIFO (First In, First Out).
+    Se utiliza para almacenar el contenido de las carpetas.
+    Garantiza que los elementos se mantengan en el orden en que fueron agregados,
+    simulando una lista de archivos ordenada temporalmente.
+    """
     
     def __init__(self):
         self.frente = None

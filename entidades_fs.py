@@ -9,7 +9,13 @@ from datetime import datetime
 from estructuras_datos import Cola
 
 class ElementoSistemaArchivos:
-    """Clase base para elementos del sistema de archivos"""
+    """
+    Clase base para elementos del sistema de archivos
+    
+    Clase padre que implementa la Herencia.
+    Define los atributos y comportamientos comunes (nombre, fechas) que compartirán
+    tanto Archivos como Carpetas, promoviendo la reutilización de código y el Polimorfismo.
+    """
     
     def __init__(self, nombre: str, tipo: str):
         self.nombre = nombre
@@ -28,7 +34,12 @@ class ElementoSistemaArchivos:
         return f"{self.tipo.capitalize()}(nombre='{self.nombre}')"
 
 class Archivo(ElementoSistemaArchivos):
-    """Representa un archivo en el sistema"""
+    """
+    Representa un archivo en el sistema
+    
+    Especialización de un elemento que contiene datos (contenido).
+    Representa las hojas del árbol del sistema de archivos (nodos sin hijos).
+    """
     
     def __init__(self, nombre: str, contenido: str = ""):
         super().__init__(nombre, "archivo")
@@ -52,7 +63,14 @@ class Archivo(ElementoSistemaArchivos):
         return f"[ARCHIVO] {self.nombre} ({len(self.contenido)} bytes)"
 
 class Carpeta(ElementoSistemaArchivos):
-    """Representa una carpeta en el sistema"""
+    """
+    Representa una carpeta en el sistema
+    
+    Especialización de un elemento que contiene otros elementos.
+    Implementa el patrón Composite (una carpeta puede contener archivos u otras carpetas).
+    Utiliza una estructura de datos lineal (Cola) para gestionar sus hijos, permitiendo
+    operaciones de inserción y recorrido.
+    """
     
     def __init__(self, nombre: str, padre=None):
         super().__init__(nombre, "carpeta")
@@ -80,8 +98,6 @@ class Carpeta(ElementoSistemaArchivos):
         if self.contenido.esta_vacia():
             return False
         
-        # CRITICO: Reconstruimos la cola, ya que la Cola no soporta eliminacion
-        # por valor/referencia
         nueva_cola = Cola()
         encontrado = False
         
@@ -95,6 +111,10 @@ class Carpeta(ElementoSistemaArchivos):
         self.contenido = nueva_cola
         self.actualizar_modificacion()
         return encontrado
+    
+    def esta_vacia(self):
+        """Verifica si la carpeta esta vacía"""
+        return self.contenido.esta_vacia()
     
     def __str__(self):
         return f"[CARPETA] {self.nombre} ({len(self.contenido)} elementos)"
