@@ -1,557 +1,530 @@
 # comandos.py
 """
-Modulo de Comandos 
-Todas las operaciones del sistema como comandos
-Bajo acoplamiento - recibe instancia de FileSystem
+Modulo de Comandos
+Soporta multiunidades, arbol n-ario de carpetas y BST de archivos.
 """
 
 from abc import ABC, abstractmethod
 from typing import List
 
+
 class Comando(ABC):
-    """Interfaz base para todos los comandos"""
-    
+    """Interfaz base para comandos."""
+
     @abstractmethod
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
-        """Ejecuta el comando con los argumentos proporcionados"""
         pass
-    
+
     @abstractmethod
     def obtener_nombre(self) -> str:
-        """Retorna el nombre del comando"""
         pass
-    
+
     def obtener_uso(self) -> str:
-        """Retorna el uso del comando"""
         return f"Uso: {self.obtener_nombre()} [argumentos]"
 
+
 class ComandoCD(Comando):
-    """
-    Comando para cambiar directorio (maneja rutas absolutas y múltiples niveles)
-    
-    Este comando se aplica para la navegación dentro del árbol de directorios del sistema de archivos.
-    Permite al usuario cambiar su ubicación actual (contexto) a otra carpeta, soportando:
-    1. Rutas relativas (ej: "cd fotos", "cd ..")
-    2. Rutas absolutas (ej: "cd C:/Documentos")
-    3. Navegación compleja (ej: "cd ../Proyectos/Python")
-    """
-    
+    """Cambiar directorio (incluye salto de unidad)."""
+
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         if not argumentos:
             return self.obtener_uso()
-        
         ruta = argumentos[0]
         sistema.registrar_operacion(f"cd {ruta}")
-        
-        # Manejar rutas absolutas (que empiezan con C:)
-        if ruta.startswith(sistema.unidad_raiz):
-            return self._manejar_ruta_absoluta(sistema, ruta)
-        # Manejar rutas relativas con múltiples niveles
-        elif '/' in ruta or '\\' in ruta:
-            return self._manejar_ruta_relativa(sistema, ruta)
-        # Manejar casos simples: .. o nombre de carpeta
-        else:
-            if ruta == "..":
-                return self._retroceder_directorio(sistema)
-            else:
-                return self._cambiar_directorio(sistema, ruta)
-    
-    def _manejar_ruta_absoluta(self, sistema, ruta: str) -> str:
-        """Maneja rutas absolutas (desde la raíz)"""
-        # Normalizar la ruta: reemplazar \ por / y eliminar la unidad
-        ruta_normalizada = ruta.replace('\\', '/')
-        if ruta_normalizada.startswith(sistema.unidad_raiz + '/'):
-            ruta_normalizada = ruta_normalizada[len(sistema.unidad_raiz)+1:]
-        elif ruta_normalizada == sistema.unidad_raiz:
-            ruta_normalizada = ""
-        
-        # Si la ruta está vacía, ir a la raíz
-        if not ruta_normalizada:
-            sistema.directorio_actual = sistema.raiz
-            sistema.ruta_actual = sistema.unidad_raiz
-            return f"Directorio actual: {sistema.ruta_actual}"
-        
-        # Dividir la ruta en partes
-        partes = ruta_normalizada.split('/')
-        # Empezar desde la raíz
-        directorio_actual = sistema.raiz
-        ruta_actual = sistema.unidad_raiz
-        
-        for parte in partes:
-            if not parte or parte == '.':
-                continue
-            elif parte == '..':
-                if directorio_actual.padre:
-                    directorio_actual = directorio_actual.padre
-                    # Actualizar ruta_actual
-                    if directorio_actual == sistema.raiz:
-                        ruta_actual = sistema.unidad_raiz
-                    else:
-                        # Recortar la última parte de la ruta
-                        partes_ruta = ruta_actual.split('/')
-                        if len(partes_ruta) > 1:
-                            ruta_actual = '/'.join(partes_ruta[:-1])
-                        else:
-                            ruta_actual = sistema.unidad_raiz
-            else:
-                siguiente = None
-                for elemento in directorio_actual.contenido:
-                    if (hasattr(elemento, 'nombre') and 
-                        elemento.nombre.lower() == parte.lower() and 
-                        elemento.tipo == "carpeta"):
-                        siguiente = elemento
-                        break
-                if siguiente is None:
-                    return f"Error: No se encuentra el directorio: {parte}"
-                directorio_actual = siguiente
-                if ruta_actual.endswith('/'):
-                    ruta_actual += parte
-                else:
-                    ruta_actual += '/' + parte
-        
-        sistema.directorio_actual = directorio_actual
-        sistema.ruta_actual = ruta_actual
+        unidad, carpeta, error = sistema.resolver_ruta(ruta)
+        if error:
+            return error
+        sistema.unidad_actual = unidad
+        sistema.directorio_actual = carpeta
+        sistema.ruta_actual = sistema.ruta_absoluta(carpeta)
         return f"Directorio actual: {sistema.ruta_actual}"
-    
-    def _manejar_ruta_relativa(self, sistema, ruta: str) -> str:
-        """Maneja rutas relativas con múltiples niveles"""
-        # Normalizar la ruta: reemplazar \ por /
-        ruta_normalizada = ruta.replace('\\', '/')
-        partes = ruta_normalizada.split('/')
-        
-        directorio_actual = sistema.directorio_actual
-        ruta_actual = sistema.ruta_actual
-        
-        for parte in partes:
-            if not parte or parte == '.':
-                continue
-            elif parte == '..':
-                if directorio_actual.padre:
-                    directorio_actual = directorio_actual.padre
-                    # Actualizar ruta_actual
-                    if directorio_actual == sistema.raiz:
-                        ruta_actual = sistema.unidad_raiz
-                    else:
-                        # Recortar la última parte de la ruta
-                        partes_ruta = ruta_actual.split('/')
-                        if len(partes_ruta) > 1:
-                            ruta_actual = '/'.join(partes_ruta[:-1])
-                        else:
-                            ruta_actual = sistema.unidad_raiz
-            else:
-                siguiente = None
-                for elemento in directorio_actual.contenido:
-                    if (hasattr(elemento, 'nombre') and 
-                        elemento.nombre.lower() == parte.lower() and 
-                        elemento.tipo == "carpeta"):
-                        siguiente = elemento
-                        break
-                if siguiente is None:
-                    return f"Error: No se encuentra el directorio: {parte}"
-                directorio_actual = siguiente
-                if ruta_actual.endswith('/'):
-                    ruta_actual += parte
-                else:
-                    ruta_actual += '/' + parte
-        
-        sistema.directorio_actual = directorio_actual
-        sistema.ruta_actual = ruta_actual
-        return f"Directorio actual: {sistema.ruta_actual}"
-    
-    def _retroceder_directorio(self, sistema) -> str:
-        """Retrocede al directorio padre usando la referencia del objeto"""
-        if sistema.directorio_actual.padre is None:
-            return "Ya estas en el directorio raiz"
-        
-        sistema.directorio_actual = sistema.directorio_actual.padre
-        
-        partes = sistema.ruta_actual.split('/')
-        sistema.ruta_actual = '/'.join(partes[:-1]) or sistema.unidad_raiz
-        
-        return f"Directorio actual: {sistema.ruta_actual}"
-    
-    def _cambiar_directorio(self, sistema, nombre_carpeta: str) -> str:
-        """Cambia a un directorio especifico buscando el objeto"""
-        
-        carpeta_destino = None
-        for elemento in sistema.directorio_actual.contenido:
-            if (hasattr(elemento, 'nombre') and 
-                elemento.nombre.lower() == nombre_carpeta.lower() and 
-                elemento.tipo == "carpeta"):
-                carpeta_destino = elemento
-                break
-        
-        if carpeta_destino:
-            sistema.directorio_actual = carpeta_destino
-            
-            if sistema.ruta_actual.endswith(':'): 
-                sistema.ruta_actual = f"{sistema.ruta_actual}/{nombre_carpeta}"
-            else:
-                sistema.ruta_actual = f"{sistema.ruta_actual}/{nombre_carpeta}"
-                
-            return f"Directorio actual: {sistema.ruta_actual}"
-        
-        return f"Error: El directorio '{nombre_carpeta}' no existe o no es una carpeta."
-    
+
     def obtener_nombre(self) -> str:
         return "cd"
-    
+
     def obtener_uso(self) -> str:
-        return "cd <ruta> (puede ser relativa o absoluta)"
+        return "cd <ruta> (soporta unidad, absoluta, relativa, ..)"
+
 
 class ComandoMKDIR(Comando):
-    """
-    Comando para crear directorios (acepta rutas destino)
-    
-  
-    Este comando se utiliza para extender la estructura del sistema de archivos creando nuevas carpetas.
-    Se aplica validando previamente que el nombre sea válido y que no exista ya un elemento con el mismo nombre.
-    También soporta la creación en rutas remotas sin necesidad de moverse (ej: "mkdir Documentos/Nuevos").
-    """
-    
+    """Crear carpeta en cualquier ruta/unidad."""
+
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         if not argumentos:
             return self.obtener_uso()
-        
         ruta_completa = argumentos[0]
-        
-        # Si la ruta contiene separadores, se trata de una ruta destino
-        if '/' in ruta_completa or '\\' in ruta_completa:
-            return self._crear_directorio_en_ruta(sistema, ruta_completa)
-        else:
-            return self._crear_directorio_actual(sistema, ruta_completa)
-    
-    def _crear_directorio_en_ruta(self, sistema, ruta_completa: str) -> str:
-        """Crea un directorio en una ruta específica"""
-        # Normalizar la ruta
-        ruta_normalizada = ruta_completa.replace('\\', '/')
-        # Separar la ruta del nombre del directorio
-        if '/' in ruta_normalizada:
-            partes = ruta_normalizada.split('/')
-            nombre_directorio = partes[-1]
+        sistema.registrar_operacion(f"mkdir {ruta_completa}")
+        ruta_norm = ruta_completa.replace('\\', '/')
+        if '/' in ruta_norm:
+            partes = [p for p in ruta_norm.split('/') if p != ""]
+            nombre_carpeta = partes[-1]
             ruta_destino = '/'.join(partes[:-1])
         else:
-            nombre_directorio = ruta_completa
+            nombre_carpeta = ruta_norm
             ruta_destino = ""
-        
-        # Guardar el estado actual
-        directorio_original = sistema.directorio_actual
-        ruta_original = sistema.ruta_actual
-        
-        # Navegar a la ruta destino (usando el comando CD)
-        comando_cd = ComandoCD()
-        resultado_cd = comando_cd.ejecutar(sistema, [ruta_destino])
-        if resultado_cd.startswith("Error"):
-            return resultado_cd
-        
-        # Crear el directorio en el destino
-        resultado_creacion = self._crear_directorio_actual(sistema, nombre_directorio)
-        
-        # Restaurar el directorio original
-        sistema.directorio_actual = directorio_original
-        sistema.ruta_actual = ruta_original
-        
-        return resultado_creacion
-    
-    def _crear_directorio_actual(self, sistema, nombre_carpeta: str) -> str:
-        """Crea un directorio en el directorio actual"""
-        
         if not self._validar_nombre(nombre_carpeta):
             return f"Nombre de carpeta invalido: {nombre_carpeta}"
-        
-        nombre_normalizado = nombre_carpeta.lower()
-        for elemento in sistema.directorio_actual.contenido:
-            if (hasattr(elemento, 'nombre') and 
-                elemento.nombre.lower() == nombre_normalizado):
-                return f"Error: Ya existe un elemento llamado '{elemento.nombre}' en este directorio."
-        
+        unidad_destino, carpeta_destino, error = sistema.resolver_ruta(ruta_destino)
+        if error:
+            return error
+        if carpeta_destino.buscar_carpeta(nombre_carpeta) or carpeta_destino.buscar_archivo(nombre_carpeta):
+            return f"Error: Ya existe un elemento llamado '{nombre_carpeta}' en este directorio."
         from entidades_fs import Carpeta
-        nueva_carpeta = Carpeta(nombre_carpeta, padre=sistema.directorio_actual)
-        sistema.directorio_actual.agregar_elemento(nueva_carpeta)
-        
-        sistema.registrar_operacion(f"mkdir {nombre_carpeta}")
+        nueva_carpeta = Carpeta(nombre_carpeta, padre=carpeta_destino)
+        carpeta_destino.agregar_carpeta(nueva_carpeta)
+        sistema.unidad_actual = unidad_destino
+        sistema.directorio_actual = carpeta_destino
+        sistema.ruta_actual = sistema.ruta_absoluta(carpeta_destino)
         sistema.respaldar_automatico()
-        
-        return f'Carpeta "{nombre_carpeta}" creada exitosamente en {sistema.ruta_actual}'
-    
+        sistema.reconstruir_indice_global()
+        return f"Carpeta '{nombre_carpeta}' creada exitosamente en {sistema.ruta_absoluta(carpeta_destino)}"
+
     def _validar_nombre(self, nombre: str) -> bool:
-        """Valida que el nombre sea adecuado"""
         caracteres_invalidos = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
-        return all(caracter not in nombre for caracter in caracteres_invalidos) and nombre.strip()
-    
+        return all(c not in nombre for c in caracteres_invalidos) and nombre.strip()
+
     def obtener_nombre(self) -> str:
         return "mkdir"
-    
+
     def obtener_uso(self) -> str:
-        return "mkdir <ruta> (puede incluir una ruta destino)"
+        return "mkdir <ruta>"
+
 
 class ComandoTYPE(Comando):
-    """
-    Comando para crear archivos con contenido ( acepta rutas destino)
-    
-    Este comando permite la creación de archivos de texto simulados con contenido.
-    Se aplica para demostrar la capacidad del sistema de manejar diferentes tipos de entidades (Archivos vs Carpetas).
-    Al igual que mkdir, soporta la creación en rutas específicas.
-    """
-    
+    """Crear archivo de texto en cualquier ruta/unidad."""
+
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         if len(argumentos) < 2:
             return self.obtener_uso()
-        
         ruta_completa = argumentos[0]
         contenido = ' '.join(argumentos[1:]).strip('"')
-        
-        # Si la ruta contiene separadores, se trata de una ruta destino
-        if '/' in ruta_completa or '\\' in ruta_completa:
-            return self._crear_archivo_en_ruta(sistema, ruta_completa, contenido)
-        else:
-            return self._crear_archivo_actual(sistema, ruta_completa, contenido)
-    
-    def _crear_archivo_en_ruta(self, sistema, ruta_completa: str, contenido: str) -> str:
-        """Crea un archivo en una ruta específica"""
-        # Normalizar la ruta
-        ruta_normalizada = ruta_completa.replace('\\', '/')
-        # Separar la ruta del nombre del archivo
-        if '/' in ruta_normalizada:
-            partes = ruta_normalizada.split('/')
+        ruta_norm = ruta_completa.replace('\\', '/')
+        if '/' in ruta_norm:
+            partes = [p for p in ruta_norm.split('/') if p != ""]
             nombre_archivo = partes[-1]
             ruta_destino = '/'.join(partes[:-1])
         else:
-            nombre_archivo = ruta_completa
+            nombre_archivo = ruta_norm
             ruta_destino = ""
-        
-        # Guardar el estado actual
-        directorio_original = sistema.directorio_actual
-        ruta_original = sistema.ruta_actual
-        
-        # Navegar a la ruta destino (usando el comando CD)
-        comando_cd = ComandoCD()
-        resultado_cd = comando_cd.ejecutar(sistema, [ruta_destino])
-        if resultado_cd.startswith("Error"):
-            return resultado_cd
-        
-        # Crear el archivo en el destino
-        resultado_creacion = self._crear_archivo_actual(sistema, nombre_archivo, contenido)
-        
-        # Restaurar el directorio original
-        sistema.directorio_actual = directorio_original
-        sistema.ruta_actual = ruta_original
-        
-        return resultado_creacion
-    
-    def _crear_archivo_actual(self, sistema, nombre_archivo: str, contenido: str) -> str:
-        """Crea un archivo en el directorio actual"""
-        
         if not self._validar_nombre_archivo(nombre_archivo):
             return f"Nombre de archivo invalido: {nombre_archivo}"
-        
-        nombre_normalizado = nombre_archivo.lower()
-        for elemento in sistema.directorio_actual.contenido:
-            if (hasattr(elemento, 'nombre') and 
-                elemento.nombre.lower() == nombre_normalizado):
-                return f"Error: Ya existe un elemento llamado '{elemento.nombre}' en este directorio."
-        
+        unidad_destino, carpeta_destino, error = sistema.resolver_ruta(ruta_destino)
+        if error:
+            return error
+        if carpeta_destino.buscar_archivo(nombre_archivo) or carpeta_destino.buscar_carpeta(nombre_archivo):
+            return f"Error: Ya existe un elemento llamado '{nombre_archivo}' en este directorio."
         from entidades_fs import Archivo
         nuevo_archivo = Archivo(nombre_archivo, contenido)
-        sistema.directorio_actual.agregar_elemento(nuevo_archivo)
-        
-        sistema.registrar_operacion(f'type {nombre_archivo} "{contenido}"')
+        if not carpeta_destino.agregar_archivo(nuevo_archivo):
+            return f"Error: Ya existe un archivo llamado '{nombre_archivo}'."
+        ruta_archivo = f"{sistema.ruta_absoluta(carpeta_destino)}/{nombre_archivo}"
+        # Indexa el archivo en el B-Tree global
+        sistema.indice_global.insertar_archivo(nuevo_archivo, ruta_archivo)
+        sistema.unidad_actual = unidad_destino
+        sistema.directorio_actual = carpeta_destino
+        sistema.ruta_actual = sistema.ruta_absoluta(carpeta_destino)
+        sistema.registrar_operacion(f'type {ruta_archivo} "{contenido}"')
         sistema.respaldar_automatico()
-        
-        return (f'Archivo "{nombre_archivo}" creado correctamente en {sistema.ruta_actual}\n'
-                f'Contenido guardado: "{contenido}"')
-    
+        return (f"Archivo '{nombre_archivo}' creado correctamente en {sistema.ruta_absoluta(carpeta_destino)}\n"
+                f"Contenido guardado: \"{contenido}\"")
+
     def _validar_nombre_archivo(self, nombre: str) -> bool:
-        """Valida que el nombre de archivo sea adecuado"""
         caracteres_invalidos = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
-        return (all(caracter not in nombre for caracter in caracteres_invalidos) 
-                and nombre.strip() and '.' in nombre)
-    
+        return all(c not in nombre for c in caracteres_invalidos) and nombre.strip() and '.' in nombre
+
     def obtener_nombre(self) -> str:
         return "type"
-    
-    def obtener_uso(self) -> str:
-        return 'type <ruta_archivo> "<contenido>" (puede incluir una ruta destino)'
 
-class ComandoRMDIR(Comando):
-    """
-    Comando para eliminar directorios ( soporta /s y /q)
-    
-    Este comando gestiona la eliminación de carpetas del sistema.
-    Se aplica con lógica de seguridad: por defecto no permite borrar carpetas que contengan archivos.
-    Implementa el flag '/s' para permitir el borrado recursivo.
-    """
-    
+    def obtener_uso(self) -> str:
+        return 'type <ruta_archivo> "<contenido>"'
+
+
+class ComandoRM(Comando):
+    """Eliminar archivos individuales."""
+
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         if not argumentos:
             return self.obtener_uso()
-        
-        # Parsear flags y nombre de carpeta
+        ruta_objetivo = argumentos[0]
+        ruta_norm = ruta_objetivo.replace('\\', '/').strip()
+        nombre_archivo = ruta_norm.split('/')[-1]
+        ruta_destino = '/'.join(ruta_norm.split('/')[:-1])
+        unidad_destino, carpeta_destino, error = sistema.resolver_ruta(ruta_destino)
+        if error:
+            return error
+        archivo = carpeta_destino.buscar_archivo(nombre_archivo)
+        if archivo is None:
+            return f"Error: El archivo '{nombre_archivo}' no existe en este directorio."
+        if not carpeta_destino.eliminar_archivo(nombre_archivo):
+            return f"Error interno al eliminar '{nombre_archivo}'."
+        ruta_archivo = f"{sistema.ruta_absoluta(carpeta_destino)}/{nombre_archivo}"
+        sistema.unidad_actual = unidad_destino
+        sistema.directorio_actual = carpeta_destino
+        sistema.ruta_actual = sistema.ruta_absoluta(carpeta_destino)
+        sistema.registrar_operacion(f"rm {ruta_objetivo}")
+        # Quita la ruta del indice B-Tree global
+        sistema.indice_global.eliminar_por_ruta(ruta_archivo)
+        sistema.respaldar_automatico()
+        return f"Archivo '{nombre_archivo}' eliminado correctamente."
+
+    def obtener_nombre(self) -> str:
+        return "rm"
+
+    def obtener_uso(self) -> str:
+        return "rm <ruta_archivo>"
+
+
+class ComandoRename(Comando):
+    """Renombrar archivos o carpetas."""
+
+    def ejecutar(self, sistema, argumentos: List[str]) -> str:
+        if len(argumentos) < 2:
+            return self.obtener_uso()
+        ruta_origen = argumentos[0].replace('\\', '/').strip()
+        nuevo_nombre = argumentos[1].strip()
+        if not self._validar_nombre(nuevo_nombre):
+            return f"Nombre de archivo invalido: {nuevo_nombre}"
+        partes = [p for p in ruta_origen.split('/') if p != ""]
+        nombre_actual = partes[-1]
+        ruta_destino = '/'.join(partes[:-1])
+        unidad_destino, carpeta_destino, error = sistema.resolver_ruta(ruta_destino)
+        if error:
+            return error
+        objetivo = carpeta_destino.buscar_carpeta(nombre_actual)
+        es_carpeta = True
+        if objetivo is None:
+            objetivo = carpeta_destino.buscar_archivo(nombre_actual)
+            es_carpeta = False
+        if objetivo is None:
+            return f"Error: No existe un elemento llamado '{nombre_actual}' en este directorio."
+        if carpeta_destino.buscar_carpeta(nuevo_nombre) or carpeta_destino.buscar_archivo(nuevo_nombre):
+            return f"Error: Ya existe un elemento llamado '{nuevo_nombre}' en este directorio."
+        ruta_base = sistema.ruta_absoluta(carpeta_destino)
+        ruta_anterior = f"{ruta_base}/{nombre_actual}"
+        if es_carpeta:
+            objetivo.nombre = nuevo_nombre
+            objetivo.actualizar_modificacion()
+            # Reindexa la carpeta completa en el B-Tree global
+            sistema.indice_global.eliminar_por_prefijo(ruta_anterior)
+            self._reinsertar_subarbol(objetivo, f"{ruta_base}/{nuevo_nombre}", sistema)
+        else:
+            archivo_obj = objetivo
+            carpeta_destino.eliminar_archivo(nombre_actual)
+            archivo_obj.nombre = nuevo_nombre
+            archivo_obj.extension = archivo_obj._obtener_extension(nuevo_nombre)
+            carpeta_destino.agregar_archivo(archivo_obj)
+            # Actualiza la entrada en el indice B-Tree global
+            sistema.indice_global.renombrar_ruta(ruta_anterior, nuevo_nombre, f"{ruta_base}/{nuevo_nombre}")
+        sistema.unidad_actual = unidad_destino
+        sistema.directorio_actual = carpeta_destino
+        sistema.ruta_actual = sistema.ruta_absoluta(carpeta_destino)
+        sistema.registrar_operacion(f"rename {ruta_origen} {nuevo_nombre}")
+        sistema.respaldar_automatico()
+        return f"Elemento '{nombre_actual}' renombrado a '{nuevo_nombre}'."
+
+    def _validar_nombre(self, nombre: str) -> bool:
+        caracteres_invalidos = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        return nombre.strip() and all(c not in nombre for c in caracteres_invalidos)
+
+    def _reinsertar_subarbol(self, carpeta, ruta_base: str, sistema):
+        for archivo in carpeta.archivos_en_orden("inorden"):
+            sistema.indice_global.insertar_archivo(archivo, f"{ruta_base}/{archivo.nombre}")
+        for sub in carpeta.subcarpetas:
+            self._reinsertar_subarbol(sub, f"{ruta_base}/{sub.nombre}", sistema)
+
+    def obtener_nombre(self) -> str:
+        return "rename"
+
+    def obtener_uso(self) -> str:
+        return "rename <ruta_origen> <nuevo_nombre>"
+
+
+class ComandoRMDIR(Comando):
+    """Eliminar directorios; soporta /s /q."""
+
+    def ejecutar(self, sistema, argumentos: List[str]) -> str:
+        if not argumentos:
+            return self.obtener_uso()
         flags = []
-        nombre_carpeta = ""
+        ruta_objetivo = None
         for arg in argumentos:
             if arg.startswith('/'):
                 flags.append(arg.upper())
             else:
-                nombre_carpeta = arg
-        
-        if not nombre_carpeta:
+                ruta_objetivo = arg
+        if ruta_objetivo is None:
             return "Error: Se requiere especificar un directorio"
-        
-        # Buscar carpeta case-insensitive
-        carpeta_a_eliminar = None
-        for elemento in sistema.directorio_actual.contenido:
-            if (hasattr(elemento, 'nombre') and 
-                elemento.nombre.lower() == nombre_carpeta.lower() and 
-                elemento.tipo == "carpeta"):
-                carpeta_a_eliminar = elemento
-                break
-        
-        if carpeta_a_eliminar is None:
-            return f"Error: La carpeta '{nombre_carpeta}' no existe en este directorio."
-        
-        # Verificar si la carpeta está vacía, a menos que se use /s
-        if not carpeta_a_eliminar.contenido.esta_vacia() and '/S' not in flags:
-            return f"Error: La carpeta '{carpeta_a_eliminar.nombre}' no está vacía. Use /s para eliminar recursivamente."
-        
-        # Si se usa /s, eliminar recursivamente
+        unidad_destino, carpeta_destino, error = sistema.resolver_ruta(ruta_objetivo)
+        if error:
+            return error
+        if carpeta_destino.padre is None:
+            return "Error: No se puede eliminar la raiz de la unidad."
+        if (carpeta_destino.subcarpetas or carpeta_destino.archivos_raiz) and '/S' not in flags:
+            return f"Error: La carpeta '{carpeta_destino.nombre}' no esta vacia. Use /s para eliminar recursivamente."
         if '/S' in flags:
-            self._eliminar_recursivamente(sistema, carpeta_a_eliminar)
+            self._eliminar_recursivo(carpeta_destino)
+            carpeta_destino.padre.eliminar_carpeta(carpeta_destino)
         else:
-            # Eliminación normal (solo si está vacía)
-            eliminado = sistema.directorio_actual.eliminar_elemento(carpeta_a_eliminar)
-            if not eliminado:
-                return f"Error interno al intentar eliminar la carpeta '{nombre_carpeta}'."
-        
-        sistema.registrar_operacion(f"rmdir {carpeta_a_eliminar.nombre}")
+            if not carpeta_destino.padre.eliminar_carpeta(carpeta_destino):
+                return f"Error interno al intentar eliminar la carpeta '{carpeta_destino.nombre}'."
+        sistema.unidad_actual = unidad_destino
+        sistema.directorio_actual = carpeta_destino.padre
+        sistema.ruta_actual = sistema.ruta_absoluta(carpeta_destino.padre)
+        # Elimina todas las rutas de la carpeta en el indice B-Tree global
+        sistema.indice_global.eliminar_por_prefijo(sistema.ruta_absoluta(carpeta_destino))
+        sistema.registrar_operacion(f"rmdir {ruta_objetivo}")
         sistema.respaldar_automatico()
-        return f'Carpeta "{carpeta_a_eliminar.nombre}" eliminada exitosamente de {sistema.ruta_actual}'
-    
-    def _eliminar_recursivamente(self, sistema, carpeta):
-        """Elimina recursivamente una carpeta y todo su contenido"""
-        # Primero eliminar todo el contenido de la carpeta
-        while not carpeta.contenido.esta_vacia():
-            elemento = carpeta.contenido.desencolar()
-            if elemento.tipo == "carpeta":
-                self._eliminar_recursivamente(sistema, elemento)
-            else:
-                # Es un archivo, se elimina directamente
-                pass  # Al desencolar, ya se elimina de la cola
-        # Luego eliminar la carpeta misma del directorio padre
-        sistema.directorio_actual.eliminar_elemento(carpeta)
-    
+        return f"Carpeta '{carpeta_destino.nombre}' eliminada exitosamente."
+
+    def _eliminar_recursivo(self, carpeta):
+        for sub in list(carpeta.subcarpetas):
+            self._eliminar_recursivo(sub)
+            carpeta.eliminar_carpeta(sub)
+        for archivo in carpeta.archivos_en_orden("inorden"):
+            carpeta.eliminar_archivo(archivo.nombre)
+
     def obtener_nombre(self) -> str:
         return "rmdir"
-    
+
     def obtener_uso(self) -> str:
-        return "rmdir <nombre_carpeta> [/s] [/q]"
+        return "rmdir <ruta_carpeta> [/s] [/q]"
+
 
 class ComandoDIR(Comando):
-    """
-    Comando para listar contenido de directorios ( acepta rutas destino)
-    
-    Este comando se usa para visualizar el estado actual del sistema de archivos.
-    Se aplica recorriendo la lista de hijos del nodo (carpeta) actual o del nodo especificado en la ruta.
-    Es fundamental para que el usuario verifique el resultado de sus operaciones anteriores.
-    """
-    
+    """Listar contenido o realizar busquedas avanzadas."""
+
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
+        if argumentos and argumentos[0] == "search":
+            return self._buscar(sistema, argumentos[1:])
         ruta = argumentos[0] if argumentos else ""
-        
         if ruta:
-            # Si se proporciona una ruta, listar ese directorio
             return self._listar_ruta(sistema, ruta)
-        else:
-            # Listar el directorio actual
-            return self._listar_actual(sistema)
-    
+        return self._listar_actual(sistema)
+
     def _listar_ruta(self, sistema, ruta: str) -> str:
-        """Lista el contenido de una ruta específica"""
-        # Guardar el estado actual
-        directorio_original = sistema.directorio_actual
-        ruta_original = sistema.ruta_actual
-        
-        # Navegar a la ruta destino (usando el comando CD)
-        comando_cd = ComandoCD()
-        resultado_cd = comando_cd.ejecutar(sistema, [ruta])
-        if resultado_cd.startswith("Error"):
-            return resultado_cd
-        
-        # Listar el directorio destino
-        resultado_listado = self._listar_actual(sistema)
-        
-        # Restaurar el directorio original
-        sistema.directorio_actual = directorio_original
-        sistema.ruta_actual = ruta_original
-        
-        return resultado_listado
-    
+        _, carpeta_destino, error = sistema.resolver_ruta(ruta)
+        if error:
+            return error
+        return self._formatear_listado(sistema, carpeta_destino, sistema.ruta_absoluta(carpeta_destino))
+
     def _listar_actual(self, sistema) -> str:
-        """Lista el contenido del directorio actual"""
+        return self._formatear_listado(sistema, sistema.directorio_actual, sistema.ruta_absoluta(sistema.directorio_actual))
+
+    def _formatear_listado(self, sistema, carpeta, ruta_texto):
         sistema.registrar_operacion("dir")
-        
-        resultado = f"Directorio de {sistema.ruta_actual}\n"
-        resultado += "-" * 40 + "\n"
-        
-        elementos = sistema.directorio_actual.listar_elementos()
-        
+        resultado = [f"Directorio de {ruta_texto}", "-" * 40]
+        elementos = carpeta.listar_elementos()
         if not elementos:
-            resultado += "El directorio esta vacio\n"
+            resultado.append("El directorio esta vacio")
         else:
             for elemento in elementos:
-                resultado += f"{elemento}\n"
-        
-        resultado += f"\nTotal: {len(elementos)} elemento(s)"
-        return resultado
-    
+                resultado.append(str(elemento))
+        resultado.append(f"\nTotal: {len(elementos)} elemento(s)")
+        return "\n".join(resultado)
+
+    def _buscar(self, sistema, args: List[str]) -> str:
+        if not args:
+            return "dir search <nombre_directorio> | dir search -file <texto> [-range min-max]"
+        if args[0] != "-file":
+            nombre_dir = args[0]
+            objetivo = self._buscar_directorio(sistema.directorio_actual, nombre_dir)
+            if objetivo is None:
+                return f"No se encontro el directorio '{nombre_dir}'."
+            rutas = []
+            for carpeta in objetivo.recorrer_subcarpetas_postorden():
+                rutas.append(sistema.ruta_absoluta(carpeta))
+                for arch in carpeta.archivos_en_orden("inorden"):
+                    rutas.append(f"{sistema.ruta_absoluta(carpeta)}/{arch.nombre}")
+            return "\n".join([f"Postorden de {sistema.ruta_absoluta(objetivo)}:"] + rutas)
+        if len(args) < 2:
+            return "Error: Falta texto para -file"
+        texto = args[1].lower()
+        minimo = None
+        maximo = None
+        if len(args) > 2 and args[2] == "-range" and len(args) > 3:
+            rango = args[3]
+            if "-" not in rango:
+                return "Error: formato de rango invalido. Use min-max"
+            partes = rango.split("-")
+            try:
+                minimo = int(partes[0]) if partes[0] else None
+                maximo = int(partes[1]) if len(partes) > 1 and partes[1] else None
+            except ValueError:
+                return "Error: los limites de rango deben ser enteros."
+        resultados = []
+        orden = "preorden" if maximo is None and minimo is None else "inorden"
+        self._buscar_archivos(sistema, sistema.directorio_actual, texto, minimo, maximo, resultados, orden=orden)
+        if not resultados:
+            return "No se encontraron archivos que coincidan."
+        encabezado = "Busqueda de archivos"
+        if minimo is not None or maximo is not None:
+            partes = []
+            if minimo is not None:
+                partes.append(f">= {minimo} KB")
+            if maximo is not None:
+                partes.append(f"<= {maximo} KB")
+            encabezado += " (" + " y ".join(partes) + ")"
+        lineas = [encabezado]
+        for idx, (ruta, tam) in enumerate(resultados, start=1):
+            lineas.append(f"{idx}. {ruta} ({tam} KB)")
+        return "\n".join(lineas)
+
+    def _buscar_directorio(self, carpeta, nombre: str):
+        if carpeta.nombre.lower() == nombre.lower():
+            return carpeta
+        for sub in carpeta.subcarpetas:
+            encontrado = self._buscar_directorio(sub, nombre)
+            if encontrado:
+                return encontrado
+        return None
+
+    def _buscar_archivos(self, sistema, carpeta, texto, minimo, maximo, salida, orden="preorden"):
+        if orden == "preorden":
+            self._procesar_archivos_carpeta(sistema, carpeta, texto, minimo, maximo, salida)
+        for sub in carpeta.subcarpetas:
+            self._buscar_archivos(sistema, sub, texto, minimo, maximo, salida, orden)
+        if orden == "postorden":
+            self._procesar_archivos_carpeta(sistema, carpeta, texto, minimo, maximo, salida)
+        if orden == "inorden":
+            if carpeta.subcarpetas:
+                mid = len(carpeta.subcarpetas) // 2
+                for sub in carpeta.subcarpetas[:mid]:
+                    self._buscar_archivos(sistema, sub, texto, minimo, maximo, salida, orden)
+                self._procesar_archivos_carpeta(sistema, carpeta, texto, minimo, maximo, salida)
+                for sub in carpeta.subcarpetas[mid:]:
+                    self._buscar_archivos(sistema, sub, texto, minimo, maximo, salida, orden)
+            else:
+                self._procesar_archivos_carpeta(sistema, carpeta, texto, minimo, maximo, salida)
+
+    def _procesar_archivos_carpeta(self, sistema, carpeta, texto, minimo, maximo, salida):
+        for archivo in carpeta.archivos_en_orden("inorden"):
+            if texto in archivo.nombre.lower():
+                tam_kb = sistema.indice_global.calcular_tamano_kb(archivo.contenido)
+                if minimo is not None and tam_kb < minimo:
+                    continue
+                if maximo is not None and tam_kb > maximo:
+                    continue
+                salida.append((f"{sistema.ruta_absoluta(carpeta)}/{archivo.nombre}", tam_kb))
+
     def obtener_nombre(self) -> str:
         return "dir"
-    
+
     def obtener_uso(self) -> str:
-        return "dir [ruta] (lista el contenido del directorio actual o de la ruta especificada)"
+        return "dir [ruta] | dir search ..."
+
 
 class ComandoLOG(Comando):
-    """Comando para mostrar historial de operaciones"""
-    
+    """Mostrar historial de operaciones."""
+
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
         sistema.registrar_operacion("log")
-        
-        resultado = "--- Historial de Operaciones (LIFO) ---\n"
-        
+        resultado = ["--- Historial de Operaciones (LIFO) ---"]
         from estructuras_datos import Pila
         pila_temp = Pila()
         historial = []
-        
         while not sistema.historial_operaciones.esta_vacia():
             operacion = sistema.historial_operaciones.desapilar()
             historial.append(operacion)
             pila_temp.apilar(operacion)
-        
         while not pila_temp.esta_vacia():
             sistema.historial_operaciones.apilar(pila_temp.desapilar())
-        
         for operacion in reversed(historial):
-            resultado += operacion + "\n"
-        
-        return resultado
-    
+            resultado.append(operacion)
+        return "\n".join(resultado)
+
     def obtener_nombre(self) -> str:
         return "log"
-    
+
     def obtener_uso(self) -> str:
         return "log (muestra el historial de operaciones)"
 
+
 class ComandoClearLog(Comando):
-    """Comando para limpiar historial"""
-    
+    """Limpiar historial de operaciones y errores."""
+
     def ejecutar(self, sistema, argumentos: List[str]) -> str:
+        sistema.registrar_operacion("clear log")
         sistema.limpiar_historial()
         sistema.limpiar_errores()
-        sistema.registrar_operacion("clear log")
         return "El historial de errores y operaciones ha sido limpiado."
-    
+
     def obtener_nombre(self) -> str:
         return "clear log"
-    
+
     def obtener_uso(self) -> str:
         return "clear log (limpia el historial de operaciones y errores)"
+
+
+class ComandoIndexSearch(Comando):
+    """Consulta el indice global basado en Arbol B."""
+
+    def ejecutar(self, sistema, argumentos: List[str]) -> str:
+        if not argumentos or argumentos[0].lower() != "search":
+            return self.obtener_uso()
+        sistema.registrar_operacion("index search")
+        nombre_filtro = None
+        minimo = None
+        maximo = None
+        i = 1
+        while i < len(argumentos):
+            arg = argumentos[i]
+            if arg == "-range" and i + 1 < len(argumentos):
+                rango = argumentos[i + 1]
+                if "-" not in rango:
+                    return "Error: formato de rango invalido. Use -range <min-max>"
+                partes = rango.split("-")
+                try:
+                    minimo = int(partes[0]) if partes[0] else None
+                    maximo = int(partes[1]) if len(partes) > 1 and partes[1] else None
+                except ValueError:
+                    return "Error: los limites de rango deben ser enteros."
+                i += 2
+                continue
+            if arg == "-file" and i + 1 < len(argumentos):
+                nombre_filtro = argumentos[i + 1]
+                i += 2
+                continue
+            if nombre_filtro is None:
+                nombre_filtro = arg
+            i += 1
+        if nombre_filtro is None and minimo is None and maximo is None:
+            return "Error: proporcione un texto o un rango para buscar."
+        # Consulta al indice B-Tree global con filtros combinados
+        resultados = sistema.indice_global.buscar_combinado(nombre_filtro, minimo, maximo)
+        if not resultados:
+            return "No se encontraron coincidencias en el indice global."
+        salida = []
+        encabezado = "Resultados encontrados en indice global:" if minimo is None and maximo is None else "Archivos encontrados en el indice global"
+        if minimo is not None or maximo is not None:
+            rango_txt = []
+            if minimo is not None:
+                rango_txt.append(f"desde {minimo} KB")
+            if maximo is not None:
+                rango_txt.append(f"hasta {maximo} KB")
+            encabezado += f" ({' y '.join(rango_txt)})"
+        salida.append(encabezado)
+        for idx, entrada in enumerate(resultados, start=1):
+            salida.append(f"{idx}. {entrada.ruta_completa} ({entrada.tamano_kb} KB)")
+        salida.append("Operacion completada.")
+        return "\n".join(salida)
+
+    def obtener_nombre(self) -> str:
+        return "index"
+
+    def obtener_uso(self) -> str:
+        return "index search [-file <texto>] [-range <min-max>]"
+
+
+class ComandoBackup(Comando):
+    """Genera un respaldo inmediato."""
+
+    def ejecutar(self, sistema, argumentos: List[str]) -> str:
+        sistema.registrar_operacion("backup")
+        resultado = sistema.respaldar_automatico()
+        return resultado
+
+    def obtener_nombre(self) -> str:
+        return "backup"
+
+    def obtener_uso(self) -> str:
+        return "backup | respaldar"

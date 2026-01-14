@@ -1,356 +1,36 @@
-# sistema_archivos.py
 """
 Modulo del Sistema de Archivos - Logica central
 Resolucion de rutas, chatbot IA, backup JSON, log
 Acoplamiento medio - solo con comandos y entidades
 """
 
-import json
-import os
-import re
 from datetime import datetime
-from typing import Dict, List
-import google.generativeai as genai
-from dotenv import load_dotenv
 
-# Cargar variables de entorno desde .env
-load_dotenv()
-
+from chatbot import ChatbotIA
+from comandos import (
+    ComandoCD,
+    ComandoDIR,
+    ComandoLOG,
+    ComandoMKDIR,
+    ComandoRMDIR,
+    ComandoTYPE,
+    ComandoClearLog,
+    ComandoIndexSearch,
+    ComandoRM,
+    ComandoRename,
+    ComandoBackup,
+)
+from configuracion import Configuracion
+from entidades_fs import Carpeta, Archivo, UnidadAlmacenamiento
 from estructuras_datos import Pila
-from entidades_fs import Carpeta, Archivo
-from comandos import (ComandoCD, ComandoMKDIR, ComandoTYPE, 
-                     ComandoRMDIR, ComandoDIR, ComandoLOG, ComandoClearLog)
+from respaldos import GestorRespaldos
+from indice_global import IndiceGlobalArchivos
 
-class Configuracion:
-    """
-    Maneja la configuracion del sistema
-    
-    Esta clase centraliza todos los parámetros configurables del sistema (persistencia).
-    Permite separar la lógica del código de los valores variables (como rutas o API keys),
-    facilitando el mantenimiento y la modificación del comportamiento sin tocar el código fuente.
-    """
-    
-    def __init__(self, archivo_config: str = "config.json"):
-        self.archivo_config = archivo_config
-        self.datos = self._cargar_configuracion()
-    
-    def _cargar_configuracion(self) -> Dict:
-        """Carga la configuracion por defecto o desde archivo"""
-        config_por_defecto = {
-            "ruta_respaldos": "backups/",
-            "comandos_activados": ["cd", "mkdir", "type", "rmdir", "dir", "log", "clear log"],
-            "habilitar_chatbot": True,
-            "unidad_raiz": "C:",
-            "log_operaciones": True,
-            "modelo_ia": "gemini-2.5-flash"
-        }
-        
-        try:
-            if os.path.exists(self.archivo_config):
-                with open(self.archivo_config, 'r') as f:
-                    config_cargada = json.load(f)
-                    return {**config_por_defecto, **config_cargada}
-        except Exception as e:
-            print(f"Error cargando configuracion: {e}")
-        
-        return config_por_defecto
-    
-    def guardar_configuracion(self) -> bool:
-        """Guarda la configuracion en archivo JSON"""
-        try:
-            with open(self.archivo_config, 'w') as f:
-                json.dump(self.datos, f, indent=4)
-            return True
-        except Exception as e:
-            print(f"Error guardando configuracion: {e}")
-            return False
-    
-    def comando_activado(self, comando: str) -> bool:
-        """Verifica si un comando esta activado"""
-        return comando in self.datos["comandos_activados"]
-    
-    def obtener_ruta_respaldos(self) -> str:
-        """Obtiene la ruta de respaldos"""
-        return self.datos["ruta_respaldos"]
-    
-    def obtener_modelo_ia(self) -> str:
-        """Obtiene el modelo de IA configurado"""
-        return self.datos.get("modelo_ia", "gemini-2.5-flash")
-
-class ChatbotIA:
-    """
-    Chatbot que usa la API de Gemini para interpretar lenguaje natural
-    
-    Esta clase actúa como un 'Adaptador' o interfaz entre nuestro sistema local y la API externa de IA.
-    Su función principal es traducir la intención del usuario (lenguaje natural) a comandos técnicos
-    que el sistema pueda entender, encapsulando toda la complejidad de la comunicación HTTP y autenticación.
-    """
-    
-    def __init__(self, config: Configuracion):
-        self.config = config
-        self.modelo = self._inicializar_modelo()
-    
-    def _inicializar_modelo(self):
-        """Inicializa el modelo de Gemini"""
-        try:
-            api_key_actual = os.getenv("GEMINI_API_KEY")
-            
-            if not api_key_actual:
-                print("ADVERTENCIA: No se encontró la variable de entorno GEMINI_API_KEY en el archivo .env")
-                return None
-            
-            genai.configure(api_key=api_key_actual)
-            modelo_configurado = self.config.obtener_modelo_ia()
-            return genai.GenerativeModel(modelo_configurado)
-        except Exception as e:
-            print(f"Error inicializando modelo IA: {e}")
-            return None
-    
-    def interpretar_comando(self, texto_usuario: str) -> str:
-        """Interpreta lenguaje natural y devuelve comando"""
-        if not self.config.datos["habilitar_chatbot"]:
-            return "ERROR: Chatbot desactivado"
-        
-        if not self.modelo:
-            return "ERROR: Modelo IA no inicializado (Verifica tu API KEY)"
-
-        # Intentar usar el modelo remoto
-        try:
-            prompt = self._crear_prompt_interpretacion(texto_usuario)
-            respuesta = self.modelo.generate_content(prompt)
-            comando = respuesta.text.strip()
-            # Limpieza básica por si el modelo devuelve comillas o markdown
-            comando = comando.replace('`', '').replace('bash', '').strip()
-            return self._validar_comando(comando)
-            
-        except Exception as e:
-            print(f"\n[DEBUG] Error de conexión con Gemini API: {e}")
-            print("[DEBUG] Intentando usar interpretación local de respaldo...\n")
-            return self._fallback_interpretar(texto_usuario)
-
-    def _fallback_interpretar(self, texto: str) -> str:
-        """Interprete simple de lenguaje natural a comandos (Solo si falla internet/API)."""
-        texto_l = texto.lower()
-
-        # Crear carpeta
-        if "crear" in texto_l and "carpeta" in texto_l:
-            match = re.search(r"llamada\s+([\w\.]+)", texto_l)
-            if match: return f"mkdir {match.group(1)}"
-            parts = texto_l.split()
-            return f"mkdir {parts[-1]}" # Intenta tomar la ultima palabra
-
-        # Cambiar directorio (Añadido 'muevete')
-        if any(x in texto_l for x in ["abre", "ir a", "cambia", "entra", "muevete", "muévete"]):
-            if ".." in texto_l or "atras" in texto_l or "anterior" in texto_l:
-                return "cd .."
-            
-            # Buscar el nombre de la carpeta
-            palabras = texto_l.split()
-            # Heurística simple: tomar la última palabra si no es una palabra común
-            ignorar = ["la", "carpeta", "a", "el", "directorio", "muevete", "muévete", "entra", "en"]
-            posibles_nombres = [p for p in palabras if p not in ignorar]
-            
-            if posibles_nombres:
-                return f"cd {posibles_nombres[-1]}"
-
-        # Listar
-        if "que hay" in texto_l or "listar" in texto_l or "muestra" in texto_l:
-            return "dir"
-
-        # Historial
-        if "historial" in texto_l and ("limpia" in texto_l or "borrar" in texto_l):
-            return "clear log"
-        if "historial" in texto_l:
-            return "log"
-
-        return 'ERROR'
-    
-    def _crear_prompt_interpretacion(self, texto: str) -> str:
-        """Crea el prompt para la interpretacion"""
-        return f"""
-        Actúa como un traductor de comandos para un sistema de archivos simulado en Python.
-        Tu única tarea es convertir la frase del usuario en un comando técnico exacto.
-        
-        COMANDOS DISPONIBLES:
-        - cd <ruta>
-        - mkdir <nombre>
-        - type <nombre> "<contenido>"
-        - rmdir <nombre>  (añade /s si implica borrar todo o forzar)
-        - dir <ruta>
-        - log
-        - clear log
-        
-        EJEMPLOS:
-        Usuario: "Crea una carpeta llamada Fotos" -> Respuesta: mkdir Fotos
-        Usuario: "Muévete a la carpeta Fotos" -> Respuesta: cd Fotos
-        Usuario: "Entra en documentos" -> Respuesta: cd Documentos
-        Usuario: "Que hay aqui?" -> Respuesta: dir
-        Usuario: "Borra la carpeta temporal" -> Respuesta: rmdir /s Temporal
-        Usuario: "Limpia el historial" -> Respuesta: clear log
-        Usuario: "Crea notas.txt que diga hola" -> Respuesta: type notas.txt "hola"
-        
-        ENTRADA DEL USUARIO: "{texto}"
-        
-        RESPUESTA (SOLO EL COMANDO, SIN EXPLICACIONES):
-        """
-    
-    def _validar_comando(self, comando: str) -> str:
-        """Valida que el comando generado sea valido"""
-        comandos_validos = ["cd", "mkdir", "type", "rmdir", "dir", "log", "clear log"]
-        if not comando: return "ERROR"
-        
-        comando_base = comando.split()[0].lower()
-        if comando_base in comandos_validos:
-            return comando
-        return "ERROR"
-
-class GestorRespaldos:
-    """
-    Maneja los respaldos automaticos del sistema
-    
-    Implementa la persistencia del estado del sistema.
-    Utiliza técnicas de serialización (convertir objetos en memoria a formato JSON) para guardar
-    snapshots del sistema, permitiendo la recuperación de datos y auditoría de operaciones.
-    """
-    
-    def __init__(self, sistema, config):
-        self.sistema = sistema
-        self.config = config
-    
-    def respaldar_automatico(self) -> str:
-        try:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            ruta_respaldos = self.config.obtener_ruta_respaldos()
-            os.makedirs(ruta_respaldos, exist_ok=True)
-            archivo_respaldo = f"{ruta_respaldos}respaldo_{timestamp}.json"
-            
-            datos_respaldo = {
-                "fecha_respaldo": timestamp,
-                "ruta_actual": self.sistema.ruta_actual,
-                "historial_operaciones": self._serializar_pila(self.sistema.historial_operaciones),
-                "errores": self._serializar_pila(self.sistema.errores),
-                "sistema_archivos": self._serializar_arbol(self.sistema.raiz)
-            }
-            
-            with open(archivo_respaldo, 'w', encoding='utf-8') as f:
-                json.dump(datos_respaldo, f, indent=4, ensure_ascii=False)
-            return f"Respaldo automatico realizado en {archivo_respaldo}"
-        except Exception as e:
-            return f"Error en respaldo automatico: {str(e)}"
-    
-    def cargar_ultimo_respaldo(self) -> bool:
-        """Carga el ultimo respaldo disponible"""
-        try:
-            ruta_respaldos = self.config.obtener_ruta_respaldos()
-            if not os.path.exists(ruta_respaldos):
-                return False
-            
-            archivos = [f for f in os.listdir(ruta_respaldos) if f.startswith("respaldo_") and f.endswith(".json")]
-            if not archivos:
-                return False
-            
-            ultimo_respaldo = sorted(archivos)[-1]
-            ruta_completa = os.path.join(ruta_respaldos, ultimo_respaldo)
-            
-            print(f"[Sistema] Cargando ultimo respaldo: {ultimo_respaldo}")
-            
-            with open(ruta_completa, 'r', encoding='utf-8') as f:
-                datos = json.load(f)
-            
-            # Restaurar historial y errores
-            self.sistema.historial_operaciones = self._deserializar_pila(datos.get("historial_operaciones", []))
-            self.sistema.errores = self._deserializar_pila(datos.get("errores", []))
-            
-            # Restaurar sistema de archivos
-            if "sistema_archivos" in datos:
-                self.sistema.raiz = self._deserializar_arbol(datos["sistema_archivos"], None)
-                # Restaurar ruta actual (simplificado: volver a raiz si es complejo, o intentar navegar)
-                # Por seguridad y simplicidad, al cargar backup volvemos a raiz o intentamos restaurar
-                self.sistema.directorio_actual = self.sistema.raiz
-                self.sistema.ruta_actual = self.sistema.unidad_raiz
-                
-                # Intentar restaurar la ruta guardada si existe
-                ruta_guardada = datos.get("ruta_actual", self.sistema.unidad_raiz)
-                if ruta_guardada != self.sistema.unidad_raiz:
-                    # Navegacion basica para restaurar contexto
-                    comando_cd = ComandoCD()
-                    comando_cd.ejecutar(self.sistema, [ruta_guardada])
-            
-            return True
-        except Exception as e:
-            print(f"Error cargando respaldo: {e}")
-            return False
-
-    def _serializar_arbol(self, carpeta) -> dict:
-        """Convierte recursivamente el arbol de carpetas a diccionario"""
-        contenido_serializado = []
-        # Iterar sobre la Cola de contenido
-        for elemento in carpeta.contenido:
-            if elemento.tipo == "carpeta":
-                contenido_serializado.append(self._serializar_arbol(elemento))
-            else:
-                contenido_serializado.append({
-                    "tipo": "archivo",
-                    "nombre": elemento.nombre,
-                    "contenido": elemento.contenido,
-                    "fecha_creacion": elemento.fecha_creacion,
-                    "fecha_modificacion": elemento.fecha_modificacion
-                })
-        
-        return {
-            "tipo": "carpeta",
-            "nombre": carpeta.nombre,
-            "contenido": contenido_serializado,
-            "fecha_creacion": carpeta.fecha_creacion,
-            "fecha_modificacion": carpeta.fecha_modificacion
-        }
-
-    def _deserializar_arbol(self, datos_nodo: dict, padre) -> object:
-        """Reconstruye recursivamente el arbol de objetos"""
-        if datos_nodo["tipo"] == "carpeta":
-            nueva_carpeta = Carpeta(datos_nodo["nombre"], padre)
-            nueva_carpeta.fecha_creacion = datos_nodo.get("fecha_creacion", "")
-            nueva_carpeta.fecha_modificacion = datos_nodo.get("fecha_modificacion", "")
-            
-            for hijo_datos in datos_nodo["contenido"]:
-                hijo_obj = self._deserializar_arbol(hijo_datos, nueva_carpeta)
-                nueva_carpeta.agregar_elemento(hijo_obj)
-            return nueva_carpeta
-        else:
-            nuevo_archivo = Archivo(datos_nodo["nombre"], datos_nodo.get("contenido", ""))
-            nuevo_archivo.fecha_creacion = datos_nodo.get("fecha_creacion", "")
-            nuevo_archivo.fecha_modificacion = datos_nodo.get("fecha_modificacion", "")
-            return nuevo_archivo
-
-    def _serializar_pila(self, pila) -> list:
-        elementos = []
-        pila_temp = Pila()
-        while not pila.esta_vacia():
-            elemento = pila.desapilar()
-            elementos.append(elemento)
-            pila_temp.apilar(elemento)
-        while not pila_temp.esta_vacia():
-            pila.apilar(pila_temp.desapilar())
-        return elementos # Retorna lista [tope, ..., fondo] o [fondo, ..., tope]? 
-        # Al desapilar obtenemos el tope primero. Append lo pone en indice 0.
-        # Si queremos guardar orden cronologico inverso (LIFO), esta bien.
-    
-    def _deserializar_pila(self, lista_elementos: list) -> Pila:
-        """Reconstruye una pila desde una lista"""
-        pila = Pila()
-        # La lista viene de _serializar_pila que extrajo: Tope, Tope-1, ... Fondo
-        # Si insertamos en ese orden en una nueva pila:
-        # Apilar(Tope) -> Pila: [Tope]
-        # Apilar(Tope-1) -> Pila: [Tope-1, Tope] -> EL ORDEN SE INVIERTE
-        # Para mantener el orden original, debemos iterar la lista al revés
-        for elemento in reversed(lista_elementos):
-            pila.apilar(elemento)
-        return pila
 
 class SistemaArchivos:
     """
     Clase principal del sistema de archivos
-    
+
     Esta es la clase 'Fachada' (Facade) o Controlador principal.
     Orquesta la interacción entre todos los subsistemas:
     1. Estructura de datos (Árbol de directorios)
@@ -359,26 +39,29 @@ class SistemaArchivos:
     4. Sistema de logs y respaldos
     Mantiene el estado global de la aplicación (ruta actual, raíz, historial).
     """
-    
+
     def __init__(self):
         self.config = Configuracion()
-        self.unidad_raiz = self.config.datos["unidad_raiz"]
-        self.raiz = Carpeta(self.unidad_raiz, padre=None)
-        self.directorio_actual = self.raiz
-        self.ruta_actual = self.unidad_raiz
+        self.unidades = self._crear_unidades(self.config.datos.get("unidades", ["C:"]))
+        self.unidad_actual = self.unidades  # cabeza de la lista enlazada
+        self.directorio_actual = self.unidad_actual.raiz
+        self.ruta_actual = self.unidad_actual.nombre
         self.historial_operaciones = Pila()
         self.errores = Pila()
         self.chatbot = ChatbotIA(self.config)
+        self.indice_global = IndiceGlobalArchivos()
         self.gestor_respaldos = GestorRespaldos(self, self.config)
-        
+
         self.comandos = self._cargar_comandos()
-        
-        # Intentar cargar respaldo, si falla, cargar datos de prueba
+
         if not self.gestor_respaldos.cargar_ultimo_respaldo():
             print("[Sistema] No se encontraron respaldos previos. Iniciando con datos de prueba.")
             self._inicializar_datos_prueba()
         else:
             print("[Sistema] Sistema restaurado desde el ultimo punto de control.")
+
+        # Siempre reconstruir el indice global al iniciar
+        self.reconstruir_indice_global()
     
     def _cargar_comandos(self) -> dict:
         return {
@@ -386,21 +69,38 @@ class SistemaArchivos:
             "mkdir": ComandoMKDIR(),
             "type": ComandoTYPE(),
             "rmdir": ComandoRMDIR(),
+            "rm": ComandoRM(),
+            "rename": ComandoRename(),
             "dir": ComandoDIR(),
             "log": ComandoLOG(),
-            "clear log": ComandoClearLog()
+            "clear log": ComandoClearLog(),
+            "index": ComandoIndexSearch(),
+            "backup": ComandoBackup(),
+            "respaldar": ComandoBackup(),
         }
+
+    def _crear_unidades(self, nombres: list) -> UnidadAlmacenamiento:
+        cabeza = None
+        anterior = None
+        for nombre in nombres:
+            unidad = UnidadAlmacenamiento(nombre)
+            if cabeza is None:
+                cabeza = unidad
+            if anterior:
+                anterior.siguiente = unidad
+            anterior = unidad
+        return cabeza
     
     def _inicializar_datos_prueba(self):
-        carpeta_docs = Carpeta("Documentos", padre=self.raiz)
+        carpeta_docs = Carpeta("Documentos", padre=self.unidad_actual.raiz)
         carpeta_proyectos = Carpeta("Proyectos", padre=carpeta_docs)
         archivo_notas = Archivo("Notas.txt", "Notas importantes del sistema")
         archivo_tareas = Archivo("Tareas.txt", "Lista de tareas pendientes")
         
-        carpeta_proyectos.agregar_elemento(archivo_tareas)
-        carpeta_docs.agregar_elemento(carpeta_proyectos)
-        carpeta_docs.agregar_elemento(archivo_notas)
-        self.raiz.agregar_elemento(carpeta_docs)
+        carpeta_proyectos.agregar_archivo(archivo_tareas)
+        carpeta_docs.agregar_carpeta(carpeta_proyectos)
+        carpeta_docs.agregar_archivo(archivo_notas)
+        self.unidad_actual.raiz.agregar_carpeta(carpeta_docs)
     
     def registrar_operacion(self, operacion: str):
         if self.config.datos["log_operaciones"]:
@@ -421,6 +121,85 @@ class SistemaArchivos:
     def limpiar_errores(self):
         while not self.errores.esta_vacia():
             self.errores.desapilar()
+
+    def construir_ruta(self, nombre: str) -> str:
+        """Construye la ruta completa usando la ruta actual."""
+        base = self.ruta_actual.rstrip('/')
+        return f"{base}/{nombre}" if base else nombre
+
+    def _obtener_unidad(self, nombre_unidad: str) -> UnidadAlmacenamiento:
+        nombre_norm = nombre_unidad.rstrip(":") + ":"
+        actual = self.unidades
+        while actual:
+            if actual.nombre.lower() == nombre_norm.lower():
+                return actual
+            actual = actual.siguiente
+        return None
+
+    def resolver_ruta(self, ruta: str):
+        """Resuelve ruta a (unidad, carpeta o None, mensaje_error)."""
+        ruta_norm = ruta.replace('\\', '/').strip()
+        unidad = self.unidad_actual
+        carpeta_actual = self.directorio_actual
+
+        # Detectar unidad explicita
+        if len(ruta_norm) >= 2 and ruta_norm[1] == ':':
+            unidad_nombre = ruta_norm[:2]
+            unidad = self._obtener_unidad(unidad_nombre)
+            if unidad is None:
+                return None, None, f"Error: La unidad {unidad_nombre} no existe."
+            ruta_norm = ruta_norm[2:]
+            carpeta_actual = unidad.raiz
+
+        # Ruta absoluta desde raiz
+        if ruta_norm.startswith('/'):
+            ruta_norm = ruta_norm.lstrip('/')
+            carpeta_actual = unidad.raiz
+
+        # Si queda vacio, devolver raiz
+        if not ruta_norm:
+            return unidad, carpeta_actual, None
+
+        partes = [p for p in ruta_norm.split('/') if p not in ('', '.')]
+        actual = carpeta_actual
+        for parte in partes:
+            if parte == '..':
+                if actual.padre:
+                    actual = actual.padre
+                continue
+            siguiente = actual.buscar_carpeta(parte)
+            if siguiente is None:
+                return None, None, f"Error: El directorio '{parte}' no existe."
+            actual = siguiente
+        return unidad, actual, None
+
+    def ruta_absoluta(self, carpeta: Carpeta) -> str:
+        partes = []
+        actual = carpeta
+        while actual and actual.padre is not None:
+            partes.append(actual.nombre)
+            actual = actual.padre
+        # actual es raiz de la unidad
+        unidad_nombre = actual.nombre if actual else self.unidad_actual.nombre
+        return unidad_nombre if not partes else f"{unidad_nombre}/{'/'.join(reversed(partes))}"
+
+    def reconstruir_indice_global(self):
+        """Reconstruye el índice global B-Tree desde el árbol de carpetas."""
+        # Limpia y repuebla el B-Tree global con todos los archivos de todas las unidades
+        self.indice_global.limpiar()
+
+        def recorrer_carpeta(carpeta: Carpeta, base: str):
+            for archivo in carpeta.archivos_en_orden("inorden"):
+                ruta = f"{base}/{archivo.nombre}" if base else archivo.nombre
+                self.indice_global.insertar_archivo(archivo, ruta)
+            for sub in carpeta.subcarpetas:
+                ruta_sub = f"{base}/{sub.nombre}" if base else sub.nombre
+                recorrer_carpeta(sub, ruta_sub)
+
+        unidad = self.unidades
+        while unidad:
+            recorrer_carpeta(unidad.raiz, unidad.nombre)
+            unidad = unidad.siguiente
     
     def ejecutar_comando(self, entrada: str) -> str:
         """
@@ -446,7 +225,7 @@ class SistemaArchivos:
         
         # 2. Si no es un comando directo, usar IA
         if comando_detectado is None:
-            if self.config.datos["habilitar_chatbot"]:
+            if self.config.datos["habilitar_chatbot"] and self.chatbot:
                 # Llamada a la API
                 print(f"[Sistema] Analizando entrada con IA...")
                 comando_traducido = self.chatbot.interpretar_comando(entrada_str)
@@ -494,7 +273,7 @@ class SistemaArchivos:
     def iniciar_consola(self):
         print("=== Sistema de Consola Inteligente con Chatbot de IA ===")
         print(f"Modelo: {self.config.obtener_modelo_ia()}")
-        print("Comandos directos: cd, mkdir, type, rmdir, dir, log, clear log")
+        print("Comandos directos: cd, mkdir, type, rm, rename, rmdir, dir, log, clear log, index, backup")
         print("Puedes escribir en lenguaje natural (ej: 'crea carpeta fotos').")
         print("Escribe 'salir' para terminar.\n")
         

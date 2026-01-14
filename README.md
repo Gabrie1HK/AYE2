@@ -34,3 +34,11 @@ Ejecuta el archivo principal:
 ```bash
 python main.py
 ```
+
+## Índice global (B-Tree)
+
+El sistema mantiene un índice global de archivos usando un Árbol B para búsquedas rápidas. Se actualiza en cada creación o eliminación y se persiste en los respaldos.
+
+- Búsqueda por nombre parcial: `index search notas`
+- Búsqueda por rango de tamaño: `index search -range 10-20`
+- Búsqueda combinada: `index search -file test -range 5-12`
